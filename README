@@ -1,0 +1,39 @@
+Below are the details for the code you can use to integrate the process for uploading coherence, SPO, floe edge polygons and ice drift products to Coresight.
+
+conda env create -f stac-api-environment.yml
+pip install -r coresight_requirements.txt
+conda activate stac_api_env
+Keep in mind the environment is already on speebuntu.
+ 
+The main script is cli.py and can be called as follows:
+python cli.py -v publish -p "<path to coherence or spo product>" -t "<product type>"
+
+The available product type names are:
+For coherence: coherence
+For SPO: spo
+For floe edge: floe_edge_polygons
+For ice drift: ice_drift
+Verbose mode is available and recommended for detailed output during execution (-v flag).
+ 
+To set up, first create a Conda environment using the provided environment file:
+conda env create -f stac-api-environment.yml
+This will install all dependencies, including Python 3.10.4.
+ 
+Next, start the GDAL container using Docker Compose:
+docker-compose up -d
+
+This approach avoids interfering with the existing GDAL setups in the processing chain, as the GDAL version required for generating COGs is higher than the one currently in use.
+
+Things to keep in mind:
+- Floe edge and ice drift do not depend on gdal as is the case with the geotiffs and could in theory be imported directly into an existing code base assuming it meets the dependencies, however
+  everything has been bundled up together for consistency. Ideally once the main processing chain gets updated to python 3, the code could be imported directly.
+  It is also important to keep in mind that the code here assumes the use of python3.10 which might have some minor differences from other python3 versions. 
+  The main difference is type hints, which could easily be removed if using an older python version. However I do recommend using the latest python version. 
+  Might also want to consider updating gdal if possible.
+
+ 
+WARNING: I did encounter sporadic rasterio errors with certain SPO files. These haven’t reoccurred recently, but please keep an eye out for them.
+ 
+Currently, the upload process is a bit time-consuming, particularly for larger files. In the future, performance improvements like bulk uploads could be considered, after all product types are compatible in the code and if time permits.
+ 
+Let me know if you need any assistance or additional information. I’m happy to help, and I expect some back and forth as we work on this.

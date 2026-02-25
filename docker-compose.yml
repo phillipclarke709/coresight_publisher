@@ -1,0 +1,9 @@
+version: '3.3'
+
+services:
+    gdal:
+        image: ghcr.io/osgeo/gdal:alpine-normal-3.10.0
+        container_name: gdal310_container
+        volumes:
+            - ./gdal310_volume:/files
+        tty: true
