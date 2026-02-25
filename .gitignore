@@ -1,16 +1,47 @@
-@'
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+
+# Environment and local secrets
 .env
 .env.*
-*.log
+*.local
+
+# Tool caches
 .pytest_cache/
 .mypy_cache/
-dist/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build artifacts
 build/
+dist/
+site/
 *.egg-info/
-'@ | Set-Content .gitignore
+.eggs/
+*.whl
+
+# Logs and runtime files
+*.log
+*.pid
+*.out
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
