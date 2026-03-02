@@ -36,6 +36,8 @@ from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.client.
     stac_api_client,
     upload_collection,
     upload_item,
+    read_item,
+    delete_item,
     check_if_item_exists,
     check_if_collection_exists
 )
@@ -43,6 +45,9 @@ from coresight_processingchain.sentinel_pairs.coresight_publisher.utils import b
 
 #os.environ["CPL_VSIL_CURL_NON_CACHED"] = "YES" # Supposedly this would fix a Rasterio error I was getting while creating a stac item.
 os.environ["PROJ_LIB"] = str(Path(sys.prefix) / "lib" / "python3.10" / "site-packages" / "rasterio" / "proj_data" )
+
+# In-memory ledger of successful deletions for audit/debug during a run.
+DELETED_PRODUCTS: List[Dict[str, str]] = []
 
 
 def configure_logging(verbose: bool) -> None:
@@ -227,6 +232,91 @@ def publish_geotiff(
         logger.error(f"An error occurred creating the STAC item. {cog_filename} will be removed from the bucket. {e}")
         remove_from_bucket(collection_id, cog_filename)
         return False
+
+
+def remove_product(
+    collection_id: str,
+    asset_name: str,
+    item_id: Optional[str] = None,
+    verbose: bool = False,
+    require_manual_confirmation: bool = True,
+) -> bool:
+    """Safely remove a published product from STAC and the GCP bucket.
+
+    Deletion order is intentional:
+    1. Validate STAC item + bucket asset existence.
+    2. Back up the STAC item in memory.
+    3. Delete STAC item first.
+    4. Pause for manual confirmation.
+    5. Delete bucket asset, or restore STAC item on cancellation.
+    """
+    configure_logging(verbose)
+    validate_collection_id_exists(collection_id)
+
+    inferred_item_id = Path(asset_name).stem
+    target_item_id = item_id or inferred_item_id
+
+    bucket_exists = does_item_exist_in_bucket(collection_id, asset_name)
+    with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+        stac_exists = check_if_item_exists(client, collection_id, target_item_id, url=STAC_API_URL)
+
+    # Safety gate: we only perform deletion when both sides are present and aligned.
+    if not stac_exists:
+        logger.error(
+            f"STAC item '{target_item_id}' was not found in collection '{collection_id}'. "
+            "Deletion aborted to avoid removing the wrong asset."
+        )
+        return False
+    if not bucket_exists:
+        logger.error(
+            f"Bucket asset '{asset_name}' was not found under collection '{collection_id}'. "
+            "Deletion aborted to avoid STAC-only deletion."
+        )
+        return False
+
+    with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+        item_backup = read_item(client, collection_id, target_item_id, url=STAC_API_URL)
+        if item_backup is None:
+            logger.error(
+                f"Failed to read STAC item '{target_item_id}' before delete; cannot guarantee rollback."
+            )
+            return False
+
+        delete_item(client, collection_id, target_item_id, url=STAC_API_URL)
+
+    with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+        if check_if_item_exists(client, collection_id, target_item_id, url=STAC_API_URL):
+            logger.error(f"STAC item '{target_item_id}' still exists after delete request; aborting.")
+            return False
+
+    if require_manual_confirmation:
+        click.echo(
+            "\nSTAC item deleted. Check Coresight now to verify the correct product disappeared."
+        )
+        confirmed = click.confirm("Proceed with deleting the Google Cloud asset?", default=False)
+        if not confirmed:
+            # Roll back immediately if manual verification fails.
+            with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+                upload_item(client, collection_id, item_backup, url=STAC_API_URL)
+            logger.info("Deletion cancelled by user. STAC item has been restored.")
+            return False
+
+    remove_from_bucket(collection_id, asset_name)
+    logger.info(f"Deleted bucket asset: {collection_id}/{asset_name}")
+
+    DELETED_PRODUCTS.append(
+        {
+            "collection_id": collection_id,
+            "item_id": target_item_id,
+            "asset_name": asset_name,
+            "deleted_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+    )
+    logger.info(
+        f"Deletion complete for item '{target_item_id}'. "
+        f"Deleted products in this run: {len(DELETED_PRODUCTS)}"
+    )
+    return True
 
 
 def validate_path(file_path: Union[str, Path], extensions: List[str]) -> Path:

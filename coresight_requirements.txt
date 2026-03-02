@@ -1,6 +1,6 @@
 affine==2.4.0
 annotated-types==0.7.0
-anyio==4.6.2.post1
+anyio==4.5.2
 async-generator==1.10
 attrs==24.2.0
 backoff==2.2.1

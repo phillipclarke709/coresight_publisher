@@ -291,6 +291,38 @@ def check_if_item_exists(
 
 @backoff.on_exception(
     backoff.expo,
+    http_errors,
+    max_tries=MAX_RETRIES,
+    jitter=backoff.full_jitter,
+    giveup=does_backoff_giveup,
+    on_backoff=handle_backoff,
+)
+def delete_item(
+    client: httpx.Client,
+    collection_id: str,
+    item_id: str,
+    url: str = settings.stac_api_url,
+) -> None:
+    """Deletes a singular STAC Item."""
+    logger.debug(f"Deleting item {item_id} from collection {collection_id}")
+    resp = client.delete(f"{url}/collections/{collection_id}/items/{item_id}")
+
+    # Treat "already gone" as successful from the caller's perspective.
+    if resp.status_code == 404:
+        logger.debug("Delete skipped; item was already missing.")
+        return
+
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.error(resp.text)
+        raise e
+
+    logger.debug("Delete successful")
+
+
+@backoff.on_exception(
+    backoff.expo,
     httpx.HTTPStatusError,
     max_tries=MAX_RETRIES,
     jitter=backoff.full_jitter,
