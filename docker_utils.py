@@ -5,7 +5,7 @@ import docker
 from loguru import logger
 import shutil
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.constants import SHARED_VOLUME_PATH, GDAL_CONTAINER_NAME
+from constants import SHARED_VOLUME_PATH, GDAL_CONTAINER_NAME
 
 
 def run_docker_command(args: list) -> None:

@@ -23,16 +23,16 @@ from pydantic import BaseModel
 from rasterio.errors import RasterioIOError
 from shapely.geometry import mapping as shapely_geometry_mapping
 from typing import Tuple, Generator, Union, List, Dict, Optional
-from coresight_processingchain.sentinel_pairs.coresight_publisher.constants import (
+from constants import (
     BASE_PATH, STAC_API_URL, STAC_API_BEARER_TOKEN, 
     BUCKET_NAME, SHARED_VOLUME_PATH, GDAL_CONTAINER_NAME, 
     CONTAINER_BASE_PATH, DEFAULT_TIMEOUT, MAKE_STAC_ITEM_TIMEOUT, 
     PRODUCT_TO_COLLECTION, FEATURE_API_TOKEN, FEATURE_API_URL, COLLECTION_TO_LAYER_NAME
 )
-from coresight_processingchain.sentinel_pairs.coresight_publisher.docker_utils import run_docker_command, clear_shared_docker_volume, copy_into_container
-from coresight_processingchain.sentinel_pairs.coresight_publisher.gcp_utils import upload_to_bucket, does_item_exist_in_bucket, remove_from_bucket
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.client.holmes_feature_api_client import client, create_items, get_page_of_items_from_collection
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.client.stac_api_client import (
+from docker_utils import run_docker_command, clear_shared_docker_volume, copy_into_container
+from gcp_utils import upload_to_bucket, does_item_exist_in_bucket, remove_from_bucket
+from holmes.client.holmes_feature_api_client import client, create_items, get_page_of_items_from_collection
+from holmes.client.stac_api_client import (
     stac_api_client,
     upload_collection,
     upload_item,
@@ -41,7 +41,7 @@ from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.client.
     check_if_item_exists,
     check_if_collection_exists
 )
-from coresight_processingchain.sentinel_pairs.coresight_publisher.utils import bbox_to_polygon, geojson_to_pmtiles
+from utils import bbox_to_polygon, geojson_to_pmtiles
 
 #os.environ["CPL_VSIL_CURL_NON_CACHED"] = "YES" # Supposedly this would fix a Rasterio error I was getting while creating a stac item.
 os.environ["PROJ_LIB"] = str(Path(sys.prefix) / "lib" / "python3.10" / "site-packages" / "rasterio" / "proj_data" )
@@ -253,6 +253,7 @@ def remove_product(
     configure_logging(verbose)
     validate_collection_id_exists(collection_id)
 
+    # In most cases the STAC item id matches the asset name without its file extension.
     inferred_item_id = Path(asset_name).stem
     target_item_id = item_id or inferred_item_id
 
@@ -275,13 +276,19 @@ def remove_product(
         return False
 
     with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
-        item_backup = read_item(client, collection_id, target_item_id, url=STAC_API_URL)
-        if item_backup is None:
+        # Keep a full in-memory copy so we can restore the item if manual verification fails.
+        original_item = read_item(client, collection_id, target_item_id, url=STAC_API_URL)
+        if original_item is None:
             logger.error(
                 f"Failed to read STAC item '{target_item_id}' before delete; cannot guarantee rollback."
             )
             return False
+        # Clone before editing so rollback uses a clean copy of the original item payload.
+        item_backup = original_item.clone()
+        # Let upload_item rebuild links on restore instead of reusing stale STAC links.
+        item_backup.links = []
 
+        # Delete STAC first so the product should disappear from the site before the asset is removed.
         delete_item(client, collection_id, target_item_id, url=STAC_API_URL)
 
     with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
@@ -293,6 +300,7 @@ def remove_product(
         click.echo(
             "\nSTAC item deleted. Check Coresight now to verify the correct product disappeared."
         )
+        # Human confirmation is the safeguard before the irreversible bucket delete.
         confirmed = click.confirm("Proceed with deleting the Google Cloud asset?", default=False)
         if not confirmed:
             # Roll back immediately if manual verification fails.
@@ -301,9 +309,11 @@ def remove_product(
             logger.info("Deletion cancelled by user. STAC item has been restored.")
             return False
 
+    # Delete the actual file only after metadata removal was verified.
     remove_from_bucket(collection_id, asset_name)
     logger.info(f"Deleted bucket asset: {collection_id}/{asset_name}")
 
+    # Track successful deletions for the current process so operators can review what changed.
     DELETED_PRODUCTS.append(
         {
             "collection_id": collection_id,

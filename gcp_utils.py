@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import sys
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.constants import DEFAULT_TIMEOUT, BUCKET_NAME
+from constants import DEFAULT_TIMEOUT, BUCKET_NAME
 from cloudpathlib import CloudPath
 from google.cloud import storage
 from loguru import logger

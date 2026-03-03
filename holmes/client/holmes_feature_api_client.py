@@ -5,8 +5,8 @@ from typing import Any
 
 import httpx
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.client.shared import resp_handler_wrapper
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.settings import settings
+from holmes.client.shared import resp_handler_wrapper
+from holmes.settings import settings
 
 
 @contextmanager

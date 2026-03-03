@@ -15,7 +15,7 @@ from shapely.ops import unary_union
 from tqdm.notebook import tqdm
 from typing import Optional, List, Dict, Union
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.constants import POSSIBLE_TIMESTAMP_FIELD_PAIRS
+from constants import POSSIBLE_TIMESTAMP_FIELD_PAIRS
 
 def configure_logging(verbose: bool) -> None:
     if not logger._core.handlers:

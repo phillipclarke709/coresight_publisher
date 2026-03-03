@@ -60,6 +60,7 @@ def publish(ctx, path: str | Path, product_type: str):
 @click.option('--no-manual-confirmation', is_flag=True, help='Skip manual checkpoint after STAC deletion.')
 def remove(ctx, collection_id: str, asset_name: str, item_id: str | None, no_manual_confirmation: bool):
     """Safely remove a product by deleting STAC item first, then bucket asset."""
+    # The CLI only collects inputs; the actual safety checks live in publisher.remove_product.
     success = remove_product(
         collection_id=collection_id,
         asset_name=asset_name,

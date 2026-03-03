@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.settings.prefect import (
+from holmes.settings.prefect import (
     PrefectBlockSettingsSource,
     PrefectGcpSettingsSource,
     is_running_in_cloud_prefect_flow,

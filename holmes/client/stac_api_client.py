@@ -7,7 +7,7 @@ import httpx
 import pystac
 from loguru import logger
 
-from coresight_processingchain.sentinel_pairs.coresight_publisher.holmes.settings import settings
+from holmes.settings import settings
 
 MAX_RETRIES = 10
 
@@ -305,6 +305,7 @@ def delete_item(
 ) -> None:
     """Deletes a singular STAC Item."""
     logger.debug(f"Deleting item {item_id} from collection {collection_id}")
+    # Delete the item record from the STAC API; this removes the product metadata layer.
     resp = client.delete(f"{url}/collections/{collection_id}/items/{item_id}")
 
     # Treat "already gone" as successful from the caller's perspective.
