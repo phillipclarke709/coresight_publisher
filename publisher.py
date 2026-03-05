@@ -50,8 +50,6 @@ from utils import bbox_to_polygon, geojson_to_pmtiles
 #os.environ["CPL_VSIL_CURL_NON_CACHED"] = "YES" # Supposedly this would fix a Rasterio error I was getting while creating a stac item.
 os.environ["PROJ_LIB"] = str(Path(sys.prefix) / "lib" / "python3.10" / "site-packages" / "rasterio" / "proj_data" )
 
-# In-memory ledger of successful deletions for audit/debug during a run.
-DELETED_PRODUCTS: List[Dict[str, str]] = []
 DELETED_PRODUCTS_CSV = BASE_PATH / "deleted_products.csv"
 
 
@@ -325,13 +323,9 @@ def remove_product(
         "deleted_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
-    # Track successful deletions for the current process so operators can review what changed.
-    DELETED_PRODUCTS.append(deletion_record)
+    # Persist successful deletions so operators can review what changed across runs.
     append_deleted_product_to_csv(deletion_record)
-    logger.info(
-        f"Deletion complete for item '{target_item_id}'. "
-        f"Deleted products in this run: {len(DELETED_PRODUCTS)}"
-    )
+    logger.info(f"Deletion complete for item '{target_item_id}'.")
     return True
 
 
