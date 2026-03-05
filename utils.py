@@ -12,7 +12,11 @@ from loguru import logger
 from pathlib import Path
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
-from tqdm.notebook import tqdm
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    def tqdm(iterable=None, *args, **kwargs):
+        return iterable
 from typing import Optional, List, Dict, Union
 
 from constants import POSSIBLE_TIMESTAMP_FIELD_PAIRS

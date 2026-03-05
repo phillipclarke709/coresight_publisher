@@ -36,6 +36,7 @@ site/
 *.log
 *.pid
 *.out
+deleted_products.csv
 
 # IDE/editor settings
 .vscode/

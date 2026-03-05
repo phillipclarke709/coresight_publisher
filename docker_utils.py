@@ -1,6 +1,9 @@
 from pathlib import Path
 import os
-import docker
+try:
+    import docker
+except ImportError:
+    docker = None
 
 from loguru import logger
 import shutil
@@ -10,6 +13,8 @@ from constants import SHARED_VOLUME_PATH, GDAL_CONTAINER_NAME
 
 def run_docker_command(args: list) -> None:
     #TODO: Could use client.containers.run instead of exec_run, then the container doesn't have to be running all the time (see feature_tracking_ft2.py for an example)
+    if docker is None:
+        raise ImportError("The 'docker' Python package is required for raster conversion commands.")
     client = docker.from_env()
     container = client.containers.get(GDAL_CONTAINER_NAME)
     exit_code, output = container.exec_run(args)

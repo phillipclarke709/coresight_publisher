@@ -1,4 +1,5 @@
 import backoff
+import csv
 import click
 import geojson_pydantic
 import geopandas as gpd
@@ -17,7 +18,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.cloud import storage
 from loguru import logger
 from multiprocessing import Process
-from osgeo import gdal
+try:
+    from osgeo import gdal
+except ImportError:
+    gdal = None
 from pathlib import Path
 from pydantic import BaseModel
 from rasterio.errors import RasterioIOError
@@ -48,6 +52,7 @@ os.environ["PROJ_LIB"] = str(Path(sys.prefix) / "lib" / "python3.10" / "site-pac
 
 # In-memory ledger of successful deletions for audit/debug during a run.
 DELETED_PRODUCTS: List[Dict[str, str]] = []
+DELETED_PRODUCTS_CSV = BASE_PATH / "deleted_products.csv"
 
 
 def configure_logging(verbose: bool) -> None:
@@ -313,20 +318,33 @@ def remove_product(
     remove_from_bucket(collection_id, asset_name)
     logger.info(f"Deleted bucket asset: {collection_id}/{asset_name}")
 
+    deletion_record = {
+        "collection_id": collection_id,
+        "item_id": target_item_id,
+        "asset_name": asset_name,
+        "deleted_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
     # Track successful deletions for the current process so operators can review what changed.
-    DELETED_PRODUCTS.append(
-        {
-            "collection_id": collection_id,
-            "item_id": target_item_id,
-            "asset_name": asset_name,
-            "deleted_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-    )
+    DELETED_PRODUCTS.append(deletion_record)
+    append_deleted_product_to_csv(deletion_record)
     logger.info(
         f"Deletion complete for item '{target_item_id}'. "
         f"Deleted products in this run: {len(DELETED_PRODUCTS)}"
     )
     return True
+
+
+def append_deleted_product_to_csv(deletion_record: Dict[str, str]) -> None:
+    """Append a successful deletion record to a CSV log in the repo root."""
+    file_exists = DELETED_PRODUCTS_CSV.exists()
+    fieldnames = ["collection_id", "item_id", "asset_name", "deleted_at_utc"]
+
+    with DELETED_PRODUCTS_CSV.open("a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(deletion_record)
 
 
 def validate_path(file_path: Union[str, Path], extensions: List[str]) -> Path:
