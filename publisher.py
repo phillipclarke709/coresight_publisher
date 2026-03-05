@@ -256,8 +256,10 @@ def remove_product(
     configure_logging(verbose)
     validate_collection_id_exists(collection_id)
 
-    # In most cases the STAC item id matches the asset name without its file extension.
-    inferred_item_id = Path(asset_name).stem
+    # In most cases the STAC item id matches the asset name with all file extensions removed.
+    inferred_item_id = asset_name
+    while Path(inferred_item_id).suffix:
+        inferred_item_id = Path(inferred_item_id).stem
     target_item_id = item_id or inferred_item_id
 
     bucket_exists = does_item_exist_in_bucket(collection_id, asset_name)
