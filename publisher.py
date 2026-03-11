@@ -307,11 +307,14 @@ def remove_product(
         )
         # Human confirmation is the safeguard before the irreversible bucket delete.
         confirmed = click.confirm("Proceed with deleting the Google Cloud asset?", default=False)
+        # Keep each confirmation cycle clean when operators process many deletions in sequence.
+        click.clear()
         if not confirmed:
             # Roll back immediately if manual verification fails.
             with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
                 upload_item(client, collection_id, item_backup, url=STAC_API_URL)
             logger.info("Deletion cancelled by user. STAC item has been restored.")
+            click.clear()
             return False
 
     # Delete the actual file only after metadata removal was verified.
@@ -328,6 +331,7 @@ def remove_product(
     # Persist successful deletions so operators can review what changed across runs.
     append_deleted_product_to_csv(deletion_record)
     logger.info(f"Deletion complete for item '{target_item_id}'.")
+    click.clear()
     return True
 
 
