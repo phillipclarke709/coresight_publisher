@@ -32,8 +32,8 @@ python cli.py remove -c fems-ice-tracking -a 20260131T211624DT2353_012713_ft2_di
 4. Pause for manual confirmation to verify website impact
 5. If confirmed, delete bucket asset
 6. If not confirmed, restore STAC item from backup
-7. Append deletion record to `deleted_products.csv`
+7. Append deletion record to `deleted_products_Hudson_Bay_2024.csv`
 
 ## Notes
 - Run in a terminal session where `GOOGLE_APPLICATION_CREDENTIALS` is set.
-- Successful deletions are logged to `deleted_products.csv`.
+- Successful deletions are logged to `deleted_products_Hudson_Bay_2024.csv`.

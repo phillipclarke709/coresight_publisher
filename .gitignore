@@ -37,6 +37,7 @@ site/
 *.pid
 *.out
 deleted_products.csv
+deleted_products_Hudson_Bay_2024.csv
 
 # IDE/editor settings
 .vscode/

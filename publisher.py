@@ -50,7 +50,7 @@ from utils import bbox_to_polygon, geojson_to_pmtiles
 #os.environ["CPL_VSIL_CURL_NON_CACHED"] = "YES" # Supposedly this would fix a Rasterio error I was getting while creating a stac item.
 os.environ["PROJ_LIB"] = str(Path(sys.prefix) / "lib" / "python3.10" / "site-packages" / "rasterio" / "proj_data" )
 
-DELETED_PRODUCTS_CSV = BASE_PATH / "deleted_products.csv"
+DELETED_PRODUCTS_CSV = BASE_PATH / "deleted_products_Hudson_Bay_2024.csv"
 
 
 def configure_logging(verbose: bool) -> None:
