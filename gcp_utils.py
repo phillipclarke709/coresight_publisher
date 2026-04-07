@@ -101,6 +101,17 @@ def does_item_exist_in_bucket(collection_id: str, filename: str) -> bool:
         logger.debug(f"File: {object_name} exists in GCP bucket, size: {blob.size}")
     return exists
 
+def list_bucket_asset_names(collection_id: str) -> List[str]:
+    """List asset filenames stored under a collection prefix in the GCP bucket."""
+    object_prefix = f"{collection_id}/"
+    client = storage.Client()
+    blobs = client.list_blobs(BUCKET_NAME, prefix=object_prefix)
+    return [
+        Path(blob.name).name
+        for blob in blobs
+        if blob.name != object_prefix and Path(blob.name).name
+    ]
+
 def remove_from_bucket(collection_id: str, filename: str) -> None:
     """Remove a file from the GCP bucket.
 

@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -8,6 +9,7 @@ from publisher import (
     publish_geotiff,
     publish_geojson,
     remove_product,
+    remove_batch,
 )
 
 
@@ -70,6 +72,25 @@ def remove(ctx, collection_id: str, asset_name: str, item_id: str | None, no_man
     )
     if not success:
         raise click.ClickException("Product removal did not complete.")
+
+
+@cli.command(name="remove-batch")
+@click.pass_context
+@click.option('-c', '--collection_id', type=str, required=True, help='STAC collection id.')
+@click.option('-p', '--asset-pattern', '--asset_pattern', type=str, required=True, help='Regex pattern to match asset filenames.')
+def remove_batch_command(ctx, collection_id: str, asset_pattern: str):
+    """Safely remove multiple products whose asset names match a regex."""
+    deleted_products = remove_batch(
+        collection_id=collection_id,
+        asset_pattern=asset_pattern,
+        verbose=ctx.obj['VERBOSE'],
+    )
+    if not deleted_products:
+        click.echo("No products were deleted.")
+    time.sleep(1)
+    click.echo("Clearing terminal")
+    time.sleep(0.5)
+    click.clear()
 
 
 if __name__ == '__main__':

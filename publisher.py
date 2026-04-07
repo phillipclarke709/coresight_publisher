@@ -6,6 +6,7 @@ import geopandas as gpd
 import os
 import pystac
 import random
+import re
 import rasterio
 import rio_stac
 import shutil
@@ -34,7 +35,7 @@ from constants import (
     PRODUCT_TO_COLLECTION, FEATURE_API_TOKEN, FEATURE_API_URL, COLLECTION_TO_LAYER_NAME
 )
 from docker_utils import run_docker_command, clear_shared_docker_volume, copy_into_container
-from gcp_utils import upload_to_bucket, does_item_exist_in_bucket, remove_from_bucket
+from gcp_utils import upload_to_bucket, does_item_exist_in_bucket, remove_from_bucket, list_bucket_asset_names
 from holmes.client.holmes_feature_api_client import client, create_items, get_page_of_items_from_collection
 from holmes.client.stac_api_client import (
     stac_api_client,
@@ -243,6 +244,7 @@ def remove_product(
     item_id: Optional[str] = None,
     verbose: bool = False,
     require_manual_confirmation: bool = True,
+    clear_terminal: bool = True,
 ) -> bool:
     """Safely remove a published product from STAC and the GCP bucket.
 
@@ -256,11 +258,7 @@ def remove_product(
     configure_logging(verbose)
     validate_collection_id_exists(collection_id)
 
-    # In most cases the STAC item id matches the asset name with all file extensions removed.
-    inferred_item_id = asset_name
-    while Path(inferred_item_id).suffix:
-        inferred_item_id = Path(inferred_item_id).stem
-    target_item_id = item_id or inferred_item_id
+    target_item_id = item_id or infer_item_id_from_asset_name(asset_name)
 
     bucket_exists = does_item_exist_in_bucket(collection_id, asset_name)
     with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
@@ -308,13 +306,15 @@ def remove_product(
         # Human confirmation is the safeguard before the irreversible bucket delete.
         confirmed = click.confirm("Proceed with deleting the Google Cloud asset?", default=False)
         # Keep each confirmation cycle clean when operators process many deletions in sequence.
-        click.clear()
+        if clear_terminal:
+            click.clear()
         if not confirmed:
             # Roll back immediately if manual verification fails.
             with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
                 upload_item(client, collection_id, item_backup, url=STAC_API_URL)
             logger.info("Deletion cancelled by user. STAC item has been restored.")
-            click.clear()
+            if clear_terminal:
+                click.clear()
             return False
 
     # Delete the actual file only after metadata removal was verified.
@@ -331,8 +331,163 @@ def remove_product(
     # Persist successful deletions so operators can review what changed across runs.
     append_deleted_product_to_csv(deletion_record)
     logger.info(f"Deletion complete for item '{target_item_id}'.")
-    click.clear()
+    if clear_terminal:
+        click.clear()
     return True
+
+
+def remove_batch(
+    collection_id: str,
+    asset_pattern: str,
+    verbose: bool = False,
+) -> List[Dict[str, str]]:
+    """Remove multiple products whose asset filenames match a user-provided regex.
+
+    Purpose:
+        Batch-delete products from one STAC collection when their asset names match
+        a regex pattern, while reusing the existing single-product safety checks.
+
+    How it works:
+        1. Lists asset filenames from the collection's GCP bucket prefix.
+        2. Applies the user-provided regex to those asset filenames.
+        3. Prints the full matched list for operator visibility.
+        4. Backs up every matching STAC item in memory before deleting anything.
+        5. Deletes all matching STAC items so the batch disappears from the website.
+        6. Pauses once for manual website verification.
+        7. If confirmed, deletes all matching bucket assets and logs them to CSV.
+        8. If cancelled, restores every STAC item from backup so the website view returns
+           to its previous state.
+
+    Input requirements:
+        collection_id must be a valid STAC collection id.
+        asset_pattern must be a valid Python regex, not a glob pattern.
+        Example regex: r"20250701.*DT00.*\\.pmtiles$"
+    """
+    configure_logging(verbose)
+    validate_collection_id_exists(collection_id)
+
+    try:
+        compiled_pattern = re.compile(asset_pattern)
+    except re.error as e:
+        raise ValueError(f"Invalid regex pattern: {asset_pattern}. {e}") from e
+
+    matches = find_matching_products(collection_id, compiled_pattern)
+    if not matches:
+        logger.info(f"No products matched pattern: {asset_pattern}")
+        return []
+
+    click.echo("\nProducts matched for deletion:")
+    for match in matches:
+        click.echo(f"- asset={match['asset_name']} item_id={match['item_id']}")
+
+    stac_backups = []
+    with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+        for match in matches:
+            asset_name = match["asset_name"]
+            item_id = match["item_id"]
+
+            # Safety gate: batch deletion requires both bucket asset and STAC item.
+            if not does_item_exist_in_bucket(collection_id, asset_name):
+                logger.error(
+                    f"Bucket asset '{asset_name}' was not found under collection '{collection_id}'. "
+                    "Batch deletion aborted before any STAC item was removed."
+                )
+                return []
+
+            original_item = read_item(client, collection_id, item_id, url=STAC_API_URL)
+            if original_item is None:
+                logger.error(
+                    f"STAC item '{item_id}' was not found in collection '{collection_id}'. "
+                    "Batch deletion aborted before any STAC item was removed."
+                )
+                return []
+
+            item_backup = original_item.clone()
+            item_backup.links = []
+            stac_backups.append(
+                {
+                    "match": match,
+                    "item_backup": item_backup,
+                }
+            )
+
+        deleted_stac_backups = []
+        try:
+            for backup in stac_backups:
+                match = backup["match"]
+                delete_item(client, collection_id, match["item_id"], url=STAC_API_URL)
+                deleted_stac_backups.append(backup)
+        except Exception:
+            logger.exception("Batch STAC delete failed; restoring any STAC items already deleted.")
+            for backup in deleted_stac_backups:
+                upload_item(client, collection_id, backup["item_backup"], url=STAC_API_URL)
+            return []
+
+        for backup in stac_backups:
+            match = backup["match"]
+            if check_if_item_exists(client, collection_id, match["item_id"], url=STAC_API_URL):
+                logger.error(
+                    f"STAC item '{match['item_id']}' still exists after batch delete request; "
+                    "restoring deleted STAC items and aborting."
+                )
+                for restore_backup in deleted_stac_backups:
+                    upload_item(client, collection_id, restore_backup["item_backup"], url=STAC_API_URL)
+                return []
+
+    click.echo(
+        "\nAll matching STAC items were deleted. Check Coresight now to verify the correct products disappeared."
+    )
+    confirmed = click.confirm(
+        "Proceed with deleting the matching Google Cloud assets?",
+        default=False,
+    )
+    if not confirmed:
+        with stac_api_client(bearer_token=STAC_API_BEARER_TOKEN) as client:
+            for backup in stac_backups:
+                upload_item(client, collection_id, backup["item_backup"], url=STAC_API_URL)
+        logger.info("Batch deletion cancelled by user. All STAC items have been restored.")
+        return []
+
+    deleted_products = []
+    for backup in stac_backups:
+        match = backup["match"]
+        remove_from_bucket(collection_id, match["asset_name"])
+        logger.info(f"Deleted bucket asset: {collection_id}/{match['asset_name']}")
+
+        deletion_record = {
+            "collection_id": collection_id,
+            "item_id": match["item_id"],
+            "asset_name": match["asset_name"],
+            "deleted_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        append_deleted_product_to_csv(deletion_record)
+        deleted_products.append(match)
+
+    logger.info(f"Batch deletion complete. Deleted {len(deleted_products)} product(s).")
+    return deleted_products
+
+
+def find_matching_products(collection_id: str, compiled_pattern: re.Pattern) -> List[Dict[str, str]]:
+    """Find bucket assets in a collection whose filenames match a regex."""
+    matches = []
+    for asset_name in list_bucket_asset_names(collection_id):
+        if compiled_pattern.search(asset_name):
+            matches.append(
+                {
+                    "item_id": infer_item_id_from_asset_name(asset_name),
+                    "asset_name": asset_name,
+                }
+            )
+
+    return matches
+
+
+def infer_item_id_from_asset_name(asset_name: str) -> str:
+    """Infer the usual STAC item id by removing all file extensions from an asset name."""
+    inferred_item_id = asset_name
+    while Path(inferred_item_id).suffix:
+        inferred_item_id = Path(inferred_item_id).stem
+    return inferred_item_id
 
 
 def append_deleted_product_to_csv(deletion_record: Dict[str, str]) -> None:
